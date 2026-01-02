@@ -22,9 +22,9 @@ download_lang() {
         "https://github.com/tesseract-ocr/tessdata/raw/main/${lang}.traineddata"
 
     if [ $? -eq 0 ]; then
-        echo "✓ $lang_name downloaded successfully"
+        echo "[OK] $lang_name downloaded successfully"
     else
-        echo "✗ Failed to download $lang_name"
+        echo "[ERROR] Failed to download $lang_name"
     fi
 }
 
