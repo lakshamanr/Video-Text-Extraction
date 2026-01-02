@@ -27,6 +27,7 @@ public partial class MainForm : Form
     {
         InitializeComponent();
         SetupRedirectConsoleOutput();
+        DetectAndSetDefaults();
     }
 
     private void InitializeComponent()
@@ -440,6 +441,49 @@ public partial class MainForm : Form
             {
                 control.Enabled = enabled;
             }
+        }
+    }
+
+    private void DetectAndSetDefaults()
+    {
+        // Try to detect Tesseract installation and set default tessdata path
+        var possiblePaths = new[]
+        {
+            @"C:\Program Files\Tesseract-OCR\tessdata",
+            @"C:\Program Files (x86)\Tesseract-OCR\tessdata",
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "Tesseract-OCR", "tessdata"),
+            Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "tessdata"),
+            Path.Combine(Directory.GetCurrentDirectory(), "tessdata"),
+            "./tessdata"
+        };
+
+        foreach (var path in possiblePaths)
+        {
+            try
+            {
+                if (Directory.Exists(path))
+                {
+                    // Check if eng.traineddata exists in this directory
+                    var engFile = Path.Combine(path, "eng.traineddata");
+                    if (File.Exists(engFile))
+                    {
+                        txtTessData.Text = path;
+                        txtTessData.ForeColor = System.Drawing.Color.Green;
+                        break;
+                    }
+                }
+            }
+            catch
+            {
+                // Ignore errors and continue checking
+            }
+        }
+
+        // If no valid path found, show warning color
+        if (!Directory.Exists(txtTessData.Text) ||
+            !File.Exists(Path.Combine(txtTessData.Text, "eng.traineddata")))
+        {
+            txtTessData.ForeColor = System.Drawing.Color.Red;
         }
     }
 
