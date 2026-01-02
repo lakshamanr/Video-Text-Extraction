@@ -23,10 +23,10 @@ function Download-Language {
 
     try {
         Invoke-WebRequest -Uri $url -OutFile $output
-        Write-Host "✓ $LangName downloaded successfully" -ForegroundColor Green
+        Write-Host "[OK] $LangName downloaded successfully" -ForegroundColor Green
     }
     catch {
-        Write-Host "✗ Failed to download $LangName" -ForegroundColor Red
+        Write-Host "[ERROR] Failed to download $LangName" -ForegroundColor Red
     }
 }
 
@@ -77,5 +77,5 @@ Write-Host "Installed language data files:"
 Get-ChildItem tessdata\*.traineddata -ErrorAction SilentlyContinue | Format-Table Name, Length
 Write-Host ""
 Write-Host "You can now run the application:" -ForegroundColor Yellow
-Write-Host '  dotnet run -- --video input.mp4 --output output.txt' -ForegroundColor White
+Write-Host "  dotnet run -- --video input.mp4 --output output.txt" -ForegroundColor White
 Write-Host ""
