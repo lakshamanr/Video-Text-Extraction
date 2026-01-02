@@ -69,6 +69,11 @@ public class OcrEngine : IDisposable
             }
 
             _engine = new TesseractEngine(options.TessDataPath, options.OcrLanguage, EngineMode.Default);
+
+            // Configure Tesseract for better accuracy
+            _engine.SetVariable("tessedit_char_whitelist", "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 .,?!:;-()[]{}\"'/@#$%&*+=");
+            _engine.SetVariable("preserve_interword_spaces", "1");
+
             Logger.Success("OCR engine initialized");
         }
         catch (Exception ex)
@@ -86,11 +91,14 @@ public class OcrEngine : IDisposable
         }
 
         Logger.Info($"Processing {framePaths.Count} frames with OCR...");
+        Logger.Info($"Duplicate removal: {(options.RemoveDuplicates ? "Enabled" : "Disabled")}");
 
         var result = new StringBuilder();
         var previousText = string.Empty;
         int processedCount = 0;
         int textFoundCount = 0;
+        int duplicatesSkipped = 0;
+        int lowConfidenceSkipped = 0;
 
         foreach (var framePath in framePaths)
         {
@@ -98,15 +106,17 @@ public class OcrEngine : IDisposable
             {
                 processedCount++;
 
-                if (processedCount % 10 == 0)
+                if (processedCount % 10 == 0 || processedCount == 1)
                 {
-                    Logger.Info($"Processing frame {processedCount}/{framePaths.Count}...");
+                    var percent = (int)((double)processedCount / framePaths.Count * 100);
+                    Logger.Info($"Processing frame {processedCount}/{framePaths.Count} ({percent}%)...");
                 }
 
                 var text = ExtractTextFromImage(framePath);
 
                 if (string.IsNullOrWhiteSpace(text))
                 {
+                    lowConfidenceSkipped++;
                     continue;
                 }
 
@@ -117,10 +127,15 @@ public class OcrEngine : IDisposable
 
                     if (IsSimilarText(cleanText, previousText))
                     {
+                        duplicatesSkipped++;
                         continue; // Skip duplicate text
                     }
 
                     previousText = cleanText;
+                }
+                else
+                {
+                    previousText = CleanText(text);
                 }
 
                 textFoundCount++;
@@ -132,16 +147,20 @@ public class OcrEngine : IDisposable
                     result.AppendLine($"[{timestamp}]");
                 }
 
-                result.AppendLine(text);
+                result.AppendLine(text.Trim());
                 result.AppendLine(); // Add blank line between segments
             }
             catch (Exception ex)
             {
-                Logger.Warning($"Error processing frame {framePath}: {ex.Message}");
+                Logger.Warning($"Error processing frame {Path.GetFileName(framePath)}: {ex.Message}");
             }
         }
 
-        Logger.Success($"OCR complete: Found text in {textFoundCount}/{processedCount} frames");
+        Logger.Success($"OCR complete:");
+        Logger.Info($"  - Frames processed: {processedCount}");
+        Logger.Info($"  - Text segments found: {textFoundCount}");
+        Logger.Info($"  - Low confidence skipped: {lowConfidenceSkipped}");
+        Logger.Info($"  - Duplicates skipped: {duplicatesSkipped}");
 
         return result.ToString();
     }
@@ -154,18 +173,67 @@ public class OcrEngine : IDisposable
         }
 
         using var img = Pix.LoadFromFile(imagePath);
-        using var page = _engine.Process(img);
+
+        // Preprocess image for better OCR
+        using var processed = PreprocessImage(img);
+
+        // Use PSM_AUTO_OSD for automatic page segmentation with orientation detection
+        using var page = _engine.Process(processed, PageSegMode.Auto);
 
         var text = page.GetText();
         var confidence = page.GetMeanConfidence();
 
-        // Only return text if confidence is reasonable
-        if (confidence < 0.3f)
+        // Only return text if confidence is reasonable (raised threshold for better quality)
+        if (confidence < 0.6f)
         {
             return string.Empty;
         }
 
+        // Clean up the text
+        text = text?.Trim() ?? string.Empty;
+
         return text;
+    }
+
+    private Pix PreprocessImage(Pix original)
+    {
+        // Create a copy to work with
+        var processed = original;
+
+        try
+        {
+            // Convert to grayscale if not already
+            if (processed.Depth != 8)
+            {
+                var gray = processed.ConvertRGBToGray();
+                if (gray != null)
+                {
+                    processed = gray;
+                }
+            }
+
+            // Increase contrast and brightness
+            var enhanced = processed.UnsharpMaskingGray(5, 2.5f);
+            if (enhanced != null)
+            {
+                processed = enhanced;
+            }
+
+            // Binarize (convert to black and white) for better OCR
+            var binarized = processed.BinarizeOtsuAdaptiveThreshold(
+                2000, 2000, 0, 0, 0.1f);
+            if (binarized != null)
+            {
+                processed = binarized;
+            }
+        }
+        catch
+        {
+            // If preprocessing fails, return original
+            return original;
+        }
+
+        return processed;
     }
 
     private string CleanText(string text)
@@ -182,25 +250,81 @@ public class OcrEngine : IDisposable
             return false;
         }
 
-        // Simple similarity check - can be improved with Levenshtein distance
-        var similarity = CalculateSimilarity(text1, text2);
-        return similarity > 0.85; // 85% similarity threshold
+        // Normalize texts
+        var norm1 = NormalizeForComparison(text1);
+        var norm2 = NormalizeForComparison(text2);
+
+        // Exact match after normalization
+        if (norm1 == norm2)
+        {
+            return true;
+        }
+
+        // Use Levenshtein distance for similarity
+        var similarity = CalculateSimilarity(norm1, norm2);
+        return similarity > 0.90; // 90% similarity threshold (stricter)
+    }
+
+    private string NormalizeForComparison(string text)
+    {
+        // Remove extra whitespace, lowercase, remove special chars
+        var normalized = text.ToLower().Trim();
+        normalized = System.Text.RegularExpressions.Regex.Replace(normalized, @"\s+", " ");
+        normalized = System.Text.RegularExpressions.Regex.Replace(normalized, @"[^\w\s]", "");
+        return normalized;
     }
 
     private double CalculateSimilarity(string text1, string text2)
     {
-        var words1 = new HashSet<string>(text1.ToLower().Split(' '));
-        var words2 = new HashSet<string>(text2.ToLower().Split(' '));
+        // Use Levenshtein distance for better accuracy
+        var distance = LevenshteinDistance(text1, text2);
+        var maxLength = Math.Max(text1.Length, text2.Length);
 
-        if (!words1.Any() || !words2.Any())
+        if (maxLength == 0)
         {
-            return 0;
+            return 1.0;
         }
 
-        var intersection = words1.Intersect(words2).Count();
-        var union = words1.Union(words2).Count();
+        return 1.0 - ((double)distance / maxLength);
+    }
 
-        return (double)intersection / union;
+    private int LevenshteinDistance(string s1, string s2)
+    {
+        if (string.IsNullOrEmpty(s1))
+        {
+            return s2?.Length ?? 0;
+        }
+
+        if (string.IsNullOrEmpty(s2))
+        {
+            return s1.Length;
+        }
+
+        var d = new int[s1.Length + 1, s2.Length + 1];
+
+        for (var i = 0; i <= s1.Length; i++)
+        {
+            d[i, 0] = i;
+        }
+
+        for (var j = 0; j <= s2.Length; j++)
+        {
+            d[0, j] = j;
+        }
+
+        for (var i = 1; i <= s1.Length; i++)
+        {
+            for (var j = 1; j <= s2.Length; j++)
+            {
+                var cost = (s2[j - 1] == s1[i - 1]) ? 0 : 1;
+
+                d[i, j] = Math.Min(
+                    Math.Min(d[i - 1, j] + 1, d[i, j - 1] + 1),
+                    d[i - 1, j - 1] + cost);
+            }
+        }
+
+        return d[s1.Length, s2.Length];
     }
 
     private int ExtractFrameNumber(string framePath)
