@@ -94,8 +94,26 @@ class Program
         rootCommand.AddOption(tessDataOption);
         rootCommand.AddOption(removeDuplicatesOption);
 
-        rootCommand.SetHandler(async (video, output, fps, forceOcr, timestamps, language, ocrLang, tessData, removeDuplicates) =>
+        // Use custom handler to avoid parameter limit (max 8 in SetHandler)
+        rootCommand.SetHandler(async (context) =>
         {
+            var video = context.ParseResult.GetValueForOption(videoOption);
+            var output = context.ParseResult.GetValueForOption(outputOption);
+            var fps = context.ParseResult.GetValueForOption(fpsOption);
+            var forceOcr = context.ParseResult.GetValueForOption(forceOcrOption);
+            var timestamps = context.ParseResult.GetValueForOption(timestampsOption);
+            var language = context.ParseResult.GetValueForOption(languageOption);
+            var ocrLang = context.ParseResult.GetValueForOption(ocrLangOption);
+            var tessData = context.ParseResult.GetValueForOption(tessDataOption);
+            var removeDuplicates = context.ParseResult.GetValueForOption(removeDuplicatesOption);
+
+            if (video == null || output == null)
+            {
+                Logger.Error("Video and output options are required");
+                context.ExitCode = 1;
+                return;
+            }
+
             var options = new ProcessingOptions
             {
                 VideoPath = video.FullName,
@@ -110,9 +128,7 @@ class Program
             };
 
             await ProcessVideoAsync(options);
-        },
-        videoOption, outputOption, fpsOption, forceOcrOption, timestampsOption,
-        languageOption, ocrLangOption, tessDataOption, removeDuplicatesOption);
+        });
 
         return await rootCommand.InvokeAsync(args);
     }
