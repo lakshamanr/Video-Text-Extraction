@@ -49,7 +49,7 @@ if ($response -match "^[Yy]") {
     Write-Host "7. Russian (rus)"
     Write-Host "8. Portuguese (por)"
     Write-Host ""
-    $languages = Read-Host "Enter language codes separated by spaces (e.g., spa fra deu)"
+    $languages = Read-Host "Enter language codes separated by spaces (e.g. spa fra deu)"
 
     foreach ($lang in $languages.Split(" ")) {
         switch ($lang) {
@@ -77,5 +77,5 @@ Write-Host "Installed language data files:"
 Get-ChildItem tessdata\*.traineddata -ErrorAction SilentlyContinue | Format-Table Name, Length
 Write-Host ""
 Write-Host "You can now run the application:" -ForegroundColor Yellow
-Write-Host "  dotnet run -- --video input.mp4 --output output.txt"
+Write-Host "  dotnet run -- --video input.mp4 --output output.txt" -ForegroundColor White
 Write-Host ""
