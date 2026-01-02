@@ -2,6 +2,24 @@
 
 A powerful C# application that extracts text from videos using **subtitles** (primary method) or **OCR** (fallback method). Perfect for extracting text from presentations, Q&A sessions, educational videos, or any video with on-screen text.
 
+## Two Versions Available
+
+### 🖥️ **GUI Version** (Windows) - **Easiest to Use!**
+A user-friendly Windows Forms application with:
+- Visual file selection dialogs
+- Point-and-click configuration
+- Real-time progress feedback
+- No command-line knowledge required
+
+**[📖 GUI Documentation](VideoTextExtraction.GUI/README.md)**
+
+### ⌨️ **CLI Version** (Cross-Platform)
+Command-line interface for:
+- Batch processing
+- Automation and scripting
+- Linux/macOS compatibility
+- Advanced workflows
+
 ## Features
 
 - **Dual Extraction Methods**:
