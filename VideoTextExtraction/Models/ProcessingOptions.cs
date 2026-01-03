@@ -69,6 +69,16 @@ public class ProcessingOptions
     /// Save each unique frame's text to a separate file
     /// </summary>
     public bool SaveSeparateFiles { get; set; } = false;
+
+    /// <summary>
+    /// Maximum video duration to process (in seconds, 0 = no limit)
+    /// </summary>
+    public int MaxDurationSeconds { get; set; } = 0;
+
+    /// <summary>
+    /// Stop processing after finding no text for this many consecutive frames
+    /// </summary>
+    public int StopAfterEmptyFrames { get; set; } = 0;
 }
 
 public enum OutputFormat

@@ -17,6 +17,8 @@ public partial class MainForm : Form
     private CheckBox chkRemoveDuplicates = null!;
     private CheckBox chkUseImageComparison = null!;
     private CheckBox chkSaveSeparateFiles = null!;
+    private NumericUpDown numMaxMinutes = null!;
+    private NumericUpDown numStopAfterEmpty = null!;
     private TextBox txtLanguage = null!;
     private TextBox txtOcrLang = null!;
     private TextBox txtTessData = null!;
@@ -36,9 +38,9 @@ public partial class MainForm : Form
     {
         // Form properties
         this.Text = "Video Text Extraction Tool";
-        this.Size = new System.Drawing.Size(800, 760);
+        this.Size = new System.Drawing.Size(800, 795);
         this.StartPosition = FormStartPosition.CenterScreen;
-        this.MinimumSize = new System.Drawing.Size(800, 760);
+        this.MinimumSize = new System.Drawing.Size(800, 795);
 
         // Create controls
         int y = 20;
@@ -109,7 +111,7 @@ public partial class MainForm : Form
         {
             Text = "Extraction Options",
             Location = new System.Drawing.Point(20, y),
-            Size = new System.Drawing.Size(controlWidth + labelWidth, 260)
+            Size = new System.Drawing.Size(controlWidth + labelWidth, 295)
         };
         this.Controls.Add(grpOptions);
 
@@ -215,6 +217,48 @@ public partial class MainForm : Form
 
         grpY += 35;
 
+        // Time limit
+        var lblMaxTime = new Label
+        {
+            Text = "Max Duration (min):",
+            Location = new System.Drawing.Point(15, grpY + 3),
+            Size = new System.Drawing.Size(150, 23),
+            TextAlign = System.Drawing.ContentAlignment.MiddleLeft
+        };
+        grpOptions.Controls.Add(lblMaxTime);
+
+        numMaxMinutes = new NumericUpDown
+        {
+            Location = new System.Drawing.Point(170, grpY),
+            Size = new System.Drawing.Size(80, 23),
+            Minimum = 0,
+            Maximum = 999,
+            Value = 0
+        };
+        grpOptions.Controls.Add(numMaxMinutes);
+
+        // Stop after empty frames
+        var lblStopEmpty = new Label
+        {
+            Text = "Stop after (empty):",
+            Location = new System.Drawing.Point(270, grpY + 3),
+            Size = new System.Drawing.Size(120, 23),
+            TextAlign = System.Drawing.ContentAlignment.MiddleLeft
+        };
+        grpOptions.Controls.Add(lblStopEmpty);
+
+        numStopAfterEmpty = new NumericUpDown
+        {
+            Location = new System.Drawing.Point(395, grpY),
+            Size = new System.Drawing.Size(80, 23),
+            Minimum = 0,
+            Maximum = 999,
+            Value = 0
+        };
+        grpOptions.Controls.Add(numStopAfterEmpty);
+
+        grpY += 35;
+
         // OCR language
         var lblOcrLang = new Label
         {
@@ -251,7 +295,7 @@ public partial class MainForm : Form
         };
         grpOptions.Controls.Add(txtTessData);
 
-        y += 275;
+        y += 310;
 
         // Process button
         btnProcess = new Button
@@ -385,6 +429,8 @@ public partial class MainForm : Form
             RemoveDuplicates = chkRemoveDuplicates.Checked,
             UseImageComparison = chkUseImageComparison.Checked,
             SaveSeparateFiles = chkSaveSeparateFiles.Checked,
+            MaxDurationSeconds = (int)numMaxMinutes.Value * 60,
+            StopAfterEmptyFrames = (int)numStopAfterEmpty.Value,
             PreferredLanguage = string.IsNullOrWhiteSpace(txtLanguage.Text) ? null : txtLanguage.Text,
             OcrLanguage = txtOcrLang.Text,
             TessDataPath = txtTessData.Text
@@ -460,6 +506,8 @@ public partial class MainForm : Form
         chkRemoveDuplicates.Enabled = enabled;
         chkUseImageComparison.Enabled = enabled;
         chkSaveSeparateFiles.Enabled = enabled;
+        numMaxMinutes.Enabled = enabled;
+        numStopAfterEmpty.Enabled = enabled;
         txtLanguage.Enabled = enabled;
         txtOcrLang.Enabled = enabled;
         txtTessData.Enabled = enabled;

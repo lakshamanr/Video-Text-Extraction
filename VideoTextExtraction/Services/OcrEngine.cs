@@ -95,6 +95,17 @@ public class OcrEngine : IDisposable
         Logger.Info($"Comparison method: {(options.UseImageComparison ? "Visual (Image)" : "Text-based")}");
         Logger.Info($"Output mode: {(options.SaveSeparateFiles ? "Separate files" : "Combined file")}");
 
+        if (options.MaxDurationSeconds > 0)
+        {
+            var maxTime = TimeSpan.FromSeconds(options.MaxDurationSeconds);
+            Logger.Info($"Time limit: {maxTime:hh\\:mm\\:ss}");
+        }
+
+        if (options.StopAfterEmptyFrames > 0)
+        {
+            Logger.Info($"Auto-stop after {options.StopAfterEmptyFrames} consecutive empty frames");
+        }
+
         var result = new StringBuilder();
         var previousText = string.Empty;
         string? previousImagePath = null;
@@ -103,6 +114,9 @@ public class OcrEngine : IDisposable
         int duplicatesSkipped = 0;
         int lowConfidenceSkipped = 0;
         int uniqueFrameNumber = 1;
+        int consecutiveEmptyFrames = 0;
+        string lastTextFoundTimestamp = "00:00:00";
+        string firstTextFoundTimestamp = "";
 
         // Create output directory for separate files if needed
         string? separateFilesDir = null;
@@ -121,10 +135,22 @@ public class OcrEngine : IDisposable
             {
                 processedCount++;
 
+                // Get current frame timestamp
+                var currentFrameNum = ExtractFrameNumber(framePath);
+                var currentTimestamp = CalculateTimestamp(currentFrameNum, options.FramesPerSecond);
+                var currentSeconds = currentFrameNum / options.FramesPerSecond;
+
+                // Check time limit
+                if (options.MaxDurationSeconds > 0 && currentSeconds > options.MaxDurationSeconds)
+                {
+                    Logger.Warning($"Reached time limit at {currentTimestamp}, stopping processing");
+                    break;
+                }
+
                 if (processedCount % 10 == 0 || processedCount == 1)
                 {
                     var percent = (int)((double)processedCount / framePaths.Count * 100);
-                    Logger.Info($"Processing frame {processedCount}/{framePaths.Count} ({percent}%)...");
+                    Logger.Info($"Processing frame {processedCount}/{framePaths.Count} ({percent}%) at {currentTimestamp}");
                 }
 
                 // Check for duplicate images BEFORE OCR (more efficient)
@@ -142,8 +168,20 @@ public class OcrEngine : IDisposable
                 if (string.IsNullOrWhiteSpace(text))
                 {
                     lowConfidenceSkipped++;
+                    consecutiveEmptyFrames++;
+
+                    // Check if we should stop due to too many empty frames
+                    if (options.StopAfterEmptyFrames > 0 && consecutiveEmptyFrames >= options.StopAfterEmptyFrames)
+                    {
+                        Logger.Warning($"No text found in {consecutiveEmptyFrames} consecutive frames at {currentTimestamp}, stopping processing");
+                        break;
+                    }
+
                     continue;
                 }
+
+                // Found text - reset consecutive empty counter
+                consecutiveEmptyFrames = 0;
 
                 // Text-based duplicate check (if not using image comparison)
                 if (options.RemoveDuplicates && !options.UseImageComparison)
@@ -168,14 +206,19 @@ public class OcrEngine : IDisposable
                 previousImagePath = framePath;
                 previousText = CleanText(text);
 
+                // Track timestamps
+                lastTextFoundTimestamp = currentTimestamp;
+                if (string.IsNullOrEmpty(firstTextFoundTimestamp))
+                {
+                    firstTextFoundTimestamp = currentTimestamp;
+                }
+
                 // Build output
                 var frameOutput = new StringBuilder();
 
                 if (options.IncludeTimestamps)
                 {
-                    var frameNum = ExtractFrameNumber(framePath);
-                    var timestamp = CalculateTimestamp(frameNum, options.FramesPerSecond);
-                    frameOutput.AppendLine($"[{timestamp}]");
+                    frameOutput.AppendLine($"[{currentTimestamp}]");
                 }
 
                 frameOutput.AppendLine(text.Trim());
@@ -206,6 +249,19 @@ public class OcrEngine : IDisposable
         Logger.Info($"  - Unique frames found: {textFoundCount}");
         Logger.Info($"  - Low confidence skipped: {lowConfidenceSkipped}");
         Logger.Info($"  - Duplicates skipped: {duplicatesSkipped}");
+
+        if (textFoundCount > 0)
+        {
+            Logger.Info($"  - First text found at: {firstTextFoundTimestamp}");
+            Logger.Info($"  - Last text found at: {lastTextFoundTimestamp}");
+
+            var timeSpan = ParseTimestamp(lastTextFoundTimestamp) - ParseTimestamp(firstTextFoundTimestamp);
+            Logger.Info($"  - Text found across: {FormatTimeSpan(timeSpan)}");
+        }
+        else
+        {
+            Logger.Warning("  - No text found in video");
+        }
 
         if (options.SaveSeparateFiles && separateFilesDir != null)
         {
@@ -247,43 +303,30 @@ public class OcrEngine : IDisposable
 
     private Pix PreprocessImage(Pix original)
     {
-        // Create a copy to work with
-        var processed = original;
-
         try
         {
             // Convert to grayscale if not already
-            if (processed.Depth != 8)
+            Pix? processed = original;
+            if (original.Depth != 8)
             {
-                var gray = processed.ConvertRGBToGray();
-                if (gray != null)
-                {
-                    processed = gray;
-                }
+                processed = original.ConvertRGBToGray();
+                if (processed == null) return original;
             }
 
-            // Increase contrast and brightness
-            var enhanced = processed.UnsharpMaskingGray(5, 2.5f);
-            if (enhanced != null)
-            {
-                processed = enhanced;
-            }
-
-            // Binarize (convert to black and white) for better OCR
-            var binarized = processed.BinarizeOtsuAdaptiveThreshold(
-                2000, 2000, 0, 0, 0.1f);
+            // Apply binarization for better OCR
+            var binarized = processed.BinarizeOtsuAdaptiveThreshold(2000, 2000, 0, 0, 0.1f);
             if (binarized != null)
             {
-                processed = binarized;
+                return binarized;
             }
+
+            return processed;
         }
         catch
         {
             // If preprocessing fails, return original
             return original;
         }
-
-        return processed;
     }
 
     private string CleanText(string text)
@@ -399,40 +442,49 @@ public class OcrEngine : IDisposable
                 return false;
             }
 
-            // Calculate structural similarity using pixel-by-pixel comparison
-            // For performance, sample every Nth pixel
-            var sampleRate = 10; // Sample every 10th pixel
-            var width = gray1.Width;
-            var height = gray1.Height;
-            var totalSamples = 0;
-            var matchingSamples = 0;
+            // Use file-based comparison as fallback since Pix doesn't support pixel access
+            // Compare file sizes first (very fast)
+            var file1 = new FileInfo(imagePath1);
+            var file2 = new FileInfo(imagePath2);
 
-            for (var y = 0; y < height; y += sampleRate)
+            // If file sizes differ significantly, images are different
+            var sizeDiff = Math.Abs(file1.Length - file2.Length);
+            var avgSize = (file1.Length + file2.Length) / 2.0;
+            var sizeSimilarity = 1.0 - (sizeDiff / avgSize);
+
+            // If files are very different sizes, skip hash comparison
+            if (sizeSimilarity < 0.90)
             {
-                for (var x = 0; x < width; x += sampleRate)
-                {
-                    totalSamples++;
-
-                    var pixel1 = gray1.GetPixel(x, y);
-                    var pixel2 = gray2.GetPixel(x, y);
-
-                    // Compare grayscale values (allow small difference for tolerance)
-                    var diff = Math.Abs(pixel1 - pixel2);
-                    if (diff < 15) // Tolerance of 15 grayscale levels (out of 256)
-                    {
-                        matchingSamples++;
-                    }
-                }
+                return false;
             }
 
-            var similarity = (double)matchingSamples / totalSamples;
-            return similarity >= threshold;
+            // Compare file hashes for exact match detection
+            var hash1 = ComputeFileHash(imagePath1);
+            var hash2 = ComputeFileHash(imagePath2);
+
+            // Exact match
+            if (hash1 == hash2)
+            {
+                return true;
+            }
+
+            // For near-duplicates, use size similarity with threshold adjustment
+            // Since we can't do pixel comparison, rely on file similarity
+            return sizeSimilarity >= threshold;
         }
         catch (Exception ex)
         {
             Logger.Warning($"Error comparing images: {ex.Message}");
             return false; // If comparison fails, treat as different
         }
+    }
+
+    private string ComputeFileHash(string filePath)
+    {
+        using var md5 = System.Security.Cryptography.MD5.Create();
+        using var stream = File.OpenRead(filePath);
+        var hash = md5.ComputeHash(stream);
+        return BitConverter.ToString(hash).Replace("-", "").ToLowerInvariant();
     }
 
     private int ExtractFrameNumber(string framePath)
@@ -456,6 +508,35 @@ public class OcrEngine : IDisposable
         var seconds = totalSeconds % 60;
 
         return $"{hours:D2}:{minutes:D2}:{seconds:D2}";
+    }
+
+    private TimeSpan ParseTimestamp(string timestamp)
+    {
+        var parts = timestamp.Split(':');
+        if (parts.Length == 3 &&
+            int.TryParse(parts[0], out var hours) &&
+            int.TryParse(parts[1], out var minutes) &&
+            int.TryParse(parts[2], out var seconds))
+        {
+            return new TimeSpan(hours, minutes, seconds);
+        }
+        return TimeSpan.Zero;
+    }
+
+    private string FormatTimeSpan(TimeSpan timeSpan)
+    {
+        if (timeSpan.TotalHours >= 1)
+        {
+            return $"{(int)timeSpan.TotalHours}h {timeSpan.Minutes}m {timeSpan.Seconds}s";
+        }
+        else if (timeSpan.TotalMinutes >= 1)
+        {
+            return $"{timeSpan.Minutes}m {timeSpan.Seconds}s";
+        }
+        else
+        {
+            return $"{timeSpan.Seconds}s";
+        }
     }
 
     public void Dispose()
