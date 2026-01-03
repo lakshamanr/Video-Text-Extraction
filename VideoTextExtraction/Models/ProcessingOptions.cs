@@ -54,6 +54,21 @@ public class ProcessingOptions
     /// Remove duplicate OCR text across consecutive frames
     /// </summary>
     public bool RemoveDuplicates { get; set; } = true;
+
+    /// <summary>
+    /// Use visual image comparison instead of text comparison for duplicate detection
+    /// </summary>
+    public bool UseImageComparison { get; set; } = true;
+
+    /// <summary>
+    /// Image similarity threshold (0.0 to 1.0, higher = more similar required)
+    /// </summary>
+    public double ImageSimilarityThreshold { get; set; } = 0.95;
+
+    /// <summary>
+    /// Save each unique frame's text to a separate file
+    /// </summary>
+    public bool SaveSeparateFiles { get; set; } = false;
 }
 
 public enum OutputFormat

@@ -15,6 +15,8 @@ public partial class MainForm : Form
     private CheckBox chkForceOcr = null!;
     private CheckBox chkTimestamps = null!;
     private CheckBox chkRemoveDuplicates = null!;
+    private CheckBox chkUseImageComparison = null!;
+    private CheckBox chkSaveSeparateFiles = null!;
     private TextBox txtLanguage = null!;
     private TextBox txtOcrLang = null!;
     private TextBox txtTessData = null!;
@@ -34,9 +36,9 @@ public partial class MainForm : Form
     {
         // Form properties
         this.Text = "Video Text Extraction Tool";
-        this.Size = new System.Drawing.Size(800, 700);
+        this.Size = new System.Drawing.Size(800, 760);
         this.StartPosition = FormStartPosition.CenterScreen;
-        this.MinimumSize = new System.Drawing.Size(800, 700);
+        this.MinimumSize = new System.Drawing.Size(800, 760);
 
         // Create controls
         int y = 20;
@@ -107,7 +109,7 @@ public partial class MainForm : Form
         {
             Text = "Extraction Options",
             Location = new System.Drawing.Point(20, y),
-            Size = new System.Drawing.Size(controlWidth + labelWidth, 200)
+            Size = new System.Drawing.Size(controlWidth + labelWidth, 260)
         };
         this.Controls.Add(grpOptions);
 
@@ -138,12 +140,36 @@ public partial class MainForm : Form
         // Remove duplicates checkbox
         chkRemoveDuplicates = new CheckBox
         {
-            Text = "Remove duplicate text (OCR mode)",
+            Text = "Remove duplicate frames",
             Location = new System.Drawing.Point(15, grpY),
             Size = new System.Drawing.Size(300, 23),
             Checked = true
         };
         grpOptions.Controls.Add(chkRemoveDuplicates);
+
+        grpY += 30;
+
+        // Use image comparison checkbox
+        chkUseImageComparison = new CheckBox
+        {
+            Text = "Compare images visually (more accurate)",
+            Location = new System.Drawing.Point(15, grpY),
+            Size = new System.Drawing.Size(350, 23),
+            Checked = true
+        };
+        grpOptions.Controls.Add(chkUseImageComparison);
+
+        grpY += 30;
+
+        // Save separate files checkbox
+        chkSaveSeparateFiles = new CheckBox
+        {
+            Text = "Save each frame to separate file",
+            Location = new System.Drawing.Point(15, grpY),
+            Size = new System.Drawing.Size(350, 23),
+            Checked = false
+        };
+        grpOptions.Controls.Add(chkSaveSeparateFiles);
 
         grpY += 35;
 
@@ -225,7 +251,7 @@ public partial class MainForm : Form
         };
         grpOptions.Controls.Add(txtTessData);
 
-        y += 215;
+        y += 275;
 
         // Process button
         btnProcess = new Button
@@ -357,6 +383,8 @@ public partial class MainForm : Form
             ForceOcr = chkForceOcr.Checked,
             IncludeTimestamps = chkTimestamps.Checked,
             RemoveDuplicates = chkRemoveDuplicates.Checked,
+            UseImageComparison = chkUseImageComparison.Checked,
+            SaveSeparateFiles = chkSaveSeparateFiles.Checked,
             PreferredLanguage = string.IsNullOrWhiteSpace(txtLanguage.Text) ? null : txtLanguage.Text,
             OcrLanguage = txtOcrLang.Text,
             TessDataPath = txtTessData.Text
@@ -430,6 +458,8 @@ public partial class MainForm : Form
         chkForceOcr.Enabled = enabled;
         chkTimestamps.Enabled = enabled;
         chkRemoveDuplicates.Enabled = enabled;
+        chkUseImageComparison.Enabled = enabled;
+        chkSaveSeparateFiles.Enabled = enabled;
         txtLanguage.Enabled = enabled;
         txtOcrLang.Enabled = enabled;
         txtTessData.Enabled = enabled;

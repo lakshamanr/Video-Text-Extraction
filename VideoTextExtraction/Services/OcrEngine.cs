@@ -92,13 +92,28 @@ public class OcrEngine : IDisposable
 
         Logger.Info($"Processing {framePaths.Count} frames with OCR...");
         Logger.Info($"Duplicate removal: {(options.RemoveDuplicates ? "Enabled" : "Disabled")}");
+        Logger.Info($"Comparison method: {(options.UseImageComparison ? "Visual (Image)" : "Text-based")}");
+        Logger.Info($"Output mode: {(options.SaveSeparateFiles ? "Separate files" : "Combined file")}");
 
         var result = new StringBuilder();
         var previousText = string.Empty;
+        string? previousImagePath = null;
         int processedCount = 0;
         int textFoundCount = 0;
         int duplicatesSkipped = 0;
         int lowConfidenceSkipped = 0;
+        int uniqueFrameNumber = 1;
+
+        // Create output directory for separate files if needed
+        string? separateFilesDir = null;
+        if (options.SaveSeparateFiles)
+        {
+            var baseDir = Path.GetDirectoryName(options.OutputPath) ?? ".";
+            var baseName = Path.GetFileNameWithoutExtension(options.OutputPath);
+            separateFilesDir = Path.Combine(baseDir, $"{baseName}_frames");
+            Directory.CreateDirectory(separateFilesDir);
+            Logger.Info($"Saving separate files to: {separateFilesDir}");
+        }
 
         foreach (var framePath in framePaths)
         {
@@ -112,6 +127,16 @@ public class OcrEngine : IDisposable
                     Logger.Info($"Processing frame {processedCount}/{framePaths.Count} ({percent}%)...");
                 }
 
+                // Check for duplicate images BEFORE OCR (more efficient)
+                if (options.RemoveDuplicates && options.UseImageComparison && previousImagePath != null)
+                {
+                    if (AreImagesSimilar(previousImagePath, framePath, options.ImageSimilarityThreshold))
+                    {
+                        duplicatesSkipped++;
+                        continue; // Skip duplicate image
+                    }
+                }
+
                 var text = ExtractTextFromImage(framePath);
 
                 if (string.IsNullOrWhiteSpace(text))
@@ -120,8 +145,8 @@ public class OcrEngine : IDisposable
                     continue;
                 }
 
-                // Remove duplicates from consecutive frames
-                if (options.RemoveDuplicates)
+                // Text-based duplicate check (if not using image comparison)
+                if (options.RemoveDuplicates && !options.UseImageComparison)
                 {
                     var cleanText = CleanText(text);
 
@@ -133,22 +158,42 @@ public class OcrEngine : IDisposable
 
                     previousText = cleanText;
                 }
-                else
+                else if (!options.RemoveDuplicates)
                 {
                     previousText = CleanText(text);
                 }
 
+                // This is a unique frame - save it
                 textFoundCount++;
+                previousImagePath = framePath;
+                previousText = CleanText(text);
+
+                // Build output
+                var frameOutput = new StringBuilder();
 
                 if (options.IncludeTimestamps)
                 {
-                    var frameNumber = ExtractFrameNumber(framePath);
-                    var timestamp = CalculateTimestamp(frameNumber, options.FramesPerSecond);
-                    result.AppendLine($"[{timestamp}]");
+                    var frameNum = ExtractFrameNumber(framePath);
+                    var timestamp = CalculateTimestamp(frameNum, options.FramesPerSecond);
+                    frameOutput.AppendLine($"[{timestamp}]");
                 }
 
-                result.AppendLine(text.Trim());
-                result.AppendLine(); // Add blank line between segments
+                frameOutput.AppendLine(text.Trim());
+
+                // Save to separate file or combined file
+                if (options.SaveSeparateFiles && separateFilesDir != null)
+                {
+                    var fileName = $"frame_{uniqueFrameNumber:D4}.txt";
+                    var filePath = Path.Combine(separateFilesDir, fileName);
+                    File.WriteAllText(filePath, frameOutput.ToString());
+                }
+                else
+                {
+                    result.AppendLine(frameOutput.ToString());
+                    result.AppendLine(); // Add blank line between segments
+                }
+
+                uniqueFrameNumber++;
             }
             catch (Exception ex)
             {
@@ -158,9 +203,14 @@ public class OcrEngine : IDisposable
 
         Logger.Success($"OCR complete:");
         Logger.Info($"  - Frames processed: {processedCount}");
-        Logger.Info($"  - Text segments found: {textFoundCount}");
+        Logger.Info($"  - Unique frames found: {textFoundCount}");
         Logger.Info($"  - Low confidence skipped: {lowConfidenceSkipped}");
         Logger.Info($"  - Duplicates skipped: {duplicatesSkipped}");
+
+        if (options.SaveSeparateFiles && separateFilesDir != null)
+        {
+            Logger.Success($"Saved {textFoundCount} separate files to: {separateFilesDir}");
+        }
 
         return result.ToString();
     }
@@ -325,6 +375,64 @@ public class OcrEngine : IDisposable
         }
 
         return d[s1.Length, s2.Length];
+    }
+
+    private bool AreImagesSimilar(string imagePath1, string imagePath2, double threshold)
+    {
+        try
+        {
+            using var img1 = Pix.LoadFromFile(imagePath1);
+            using var img2 = Pix.LoadFromFile(imagePath2);
+
+            // Quick check: if dimensions are different, images are different
+            if (img1.Width != img2.Width || img1.Height != img2.Height)
+            {
+                return false;
+            }
+
+            // Convert both images to grayscale for comparison
+            using var gray1 = img1.Depth == 8 ? img1.Clone() : img1.ConvertRGBToGray();
+            using var gray2 = img2.Depth == 8 ? img2.Clone() : img2.ConvertRGBToGray();
+
+            if (gray1 == null || gray2 == null)
+            {
+                return false;
+            }
+
+            // Calculate structural similarity using pixel-by-pixel comparison
+            // For performance, sample every Nth pixel
+            var sampleRate = 10; // Sample every 10th pixel
+            var width = gray1.Width;
+            var height = gray1.Height;
+            var totalSamples = 0;
+            var matchingSamples = 0;
+
+            for (var y = 0; y < height; y += sampleRate)
+            {
+                for (var x = 0; x < width; x += sampleRate)
+                {
+                    totalSamples++;
+
+                    var pixel1 = gray1.GetPixel(x, y);
+                    var pixel2 = gray2.GetPixel(x, y);
+
+                    // Compare grayscale values (allow small difference for tolerance)
+                    var diff = Math.Abs(pixel1 - pixel2);
+                    if (diff < 15) // Tolerance of 15 grayscale levels (out of 256)
+                    {
+                        matchingSamples++;
+                    }
+                }
+            }
+
+            var similarity = (double)matchingSamples / totalSamples;
+            return similarity >= threshold;
+        }
+        catch (Exception ex)
+        {
+            Logger.Warning($"Error comparing images: {ex.Message}");
+            return false; // If comparison fails, treat as different
+        }
     }
 
     private int ExtractFrameNumber(string framePath)
