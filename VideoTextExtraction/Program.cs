@@ -84,6 +84,12 @@ class Program
             description: "Remove duplicate text from consecutive frames",
             getDefaultValue: () => true);
 
+        // Save separate files option
+        var saveSeparateFilesOption = new Option<bool>(
+            aliases: new[] { "--save-separate-files" },
+            description: "Save each unique frame's text to a separate file",
+            getDefaultValue: () => false);
+
         // Video length limit option
         var videoLengthOption = new Option<int>(
             aliases: new[] { "--video-length" },
@@ -111,6 +117,7 @@ class Program
         rootCommand.AddOption(ocrLangOption);
         rootCommand.AddOption(tessDataOption);
         rootCommand.AddOption(removeDuplicatesOption);
+        rootCommand.AddOption(saveSeparateFilesOption);
         rootCommand.AddOption(videoLengthOption);
         rootCommand.AddOption(parallelProcessingOption);
         rootCommand.AddOption(maxParallelismOption);
@@ -127,6 +134,7 @@ class Program
             var ocrLang = context.ParseResult.GetValueForOption(ocrLangOption);
             var tessData = context.ParseResult.GetValueForOption(tessDataOption);
             var removeDuplicates = context.ParseResult.GetValueForOption(removeDuplicatesOption);
+            var saveSeparateFiles = context.ParseResult.GetValueForOption(saveSeparateFilesOption);
             var videoLength = context.ParseResult.GetValueForOption(videoLengthOption);
             var enableParallel = context.ParseResult.GetValueForOption(parallelProcessingOption);
             var maxParallelism = context.ParseResult.GetValueForOption(maxParallelismOption);
@@ -149,6 +157,7 @@ class Program
                 OcrLanguage = ocrLang,
                 TessDataPath = tessData,
                 RemoveDuplicates = removeDuplicates,
+                SaveSeparateFiles = saveSeparateFiles,
                 MaxVideoLengthMinutes = videoLength,
                 EnableParallelProcessing = enableParallel,
                 MaxDegreeOfParallelism = maxParallelism
