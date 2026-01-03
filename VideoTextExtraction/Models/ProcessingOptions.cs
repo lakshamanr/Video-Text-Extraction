@@ -85,6 +85,16 @@ public class ProcessingOptions
     /// For example, if set to 30, only the first 30 minutes of the video will be processed
     /// </summary>
     public int MaxVideoLengthMinutes { get; set; } = 0;
+
+    /// <summary>
+    /// Enable parallel processing for OCR (processes multiple frames simultaneously)
+    /// </summary>
+    public bool EnableParallelProcessing { get; set; } = false;
+
+    /// <summary>
+    /// Maximum degree of parallelism (number of frames to process simultaneously, 0 = auto)
+    /// </summary>
+    public int MaxDegreeOfParallelism { get; set; } = 0;
 }
 
 public enum OutputFormat

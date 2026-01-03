@@ -20,6 +20,8 @@ public partial class MainForm : Form
     private NumericUpDown numMaxMinutes = null!;
     private NumericUpDown numStopAfterEmpty = null!;
     private NumericUpDown numVideoLength = null!;
+    private CheckBox chkEnableParallel = null!;
+    private NumericUpDown numParallelThreads = null!;
     private TextBox txtLanguage = null!;
     private TextBox txtOcrLang = null!;
     private TextBox txtTessData = null!;
@@ -39,9 +41,9 @@ public partial class MainForm : Form
     {
         // Form properties
         this.Text = "Video Text Extraction Tool";
-        this.Size = new System.Drawing.Size(800, 830);
+        this.Size = new System.Drawing.Size(800, 865);
         this.StartPosition = FormStartPosition.CenterScreen;
-        this.MinimumSize = new System.Drawing.Size(800, 830);
+        this.MinimumSize = new System.Drawing.Size(800, 865);
 
         // Create controls
         int y = 20;
@@ -112,7 +114,7 @@ public partial class MainForm : Form
         {
             Text = "Extraction Options",
             Location = new System.Drawing.Point(20, y),
-            Size = new System.Drawing.Size(controlWidth + labelWidth, 330)
+            Size = new System.Drawing.Size(controlWidth + labelWidth, 365)
         };
         this.Controls.Add(grpOptions);
 
@@ -287,6 +289,43 @@ public partial class MainForm : Form
 
         grpY += 35;
 
+        // Parallel processing checkbox
+        chkEnableParallel = new CheckBox
+        {
+            Text = "Enable Parallel Processing (faster OCR)",
+            Location = new System.Drawing.Point(15, grpY),
+            Size = new System.Drawing.Size(300, 23),
+            Checked = false
+        };
+        grpOptions.Controls.Add(chkEnableParallel);
+
+        // Parallel threads control
+        var lblParallelThreads = new Label
+        {
+            Text = "Threads:",
+            Location = new System.Drawing.Point(320, grpY + 3),
+            Size = new System.Drawing.Size(70, 23),
+            TextAlign = System.Drawing.ContentAlignment.MiddleLeft
+        };
+        grpOptions.Controls.Add(lblParallelThreads);
+
+        numParallelThreads = new NumericUpDown
+        {
+            Location = new System.Drawing.Point(395, grpY),
+            Size = new System.Drawing.Size(80, 23),
+            Minimum = 0,
+            Maximum = 32,
+            Value = 0
+        };
+        grpOptions.Controls.Add(numParallelThreads);
+
+        // Tooltip for parallel processing
+        var tooltipParallel = new ToolTip();
+        tooltipParallel.SetToolTip(chkEnableParallel, "Process multiple frames simultaneously for faster extraction");
+        tooltipParallel.SetToolTip(numParallelThreads, "Number of threads (0 = auto-detect CPU cores)");
+
+        grpY += 35;
+
         // OCR language
         var lblOcrLang = new Label
         {
@@ -323,7 +362,7 @@ public partial class MainForm : Form
         };
         grpOptions.Controls.Add(txtTessData);
 
-        y += 345;
+        y += 380;
 
         // Process button
         btnProcess = new Button
@@ -460,6 +499,8 @@ public partial class MainForm : Form
             MaxDurationSeconds = (int)numMaxMinutes.Value * 60,
             StopAfterEmptyFrames = (int)numStopAfterEmpty.Value,
             MaxVideoLengthMinutes = (int)numVideoLength.Value,
+            EnableParallelProcessing = chkEnableParallel.Checked,
+            MaxDegreeOfParallelism = (int)numParallelThreads.Value,
             PreferredLanguage = string.IsNullOrWhiteSpace(txtLanguage.Text) ? null : txtLanguage.Text,
             OcrLanguage = txtOcrLang.Text,
             TessDataPath = txtTessData.Text

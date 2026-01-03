@@ -1,4 +1,5 @@
 using System.Text;
+using System.Collections.Concurrent;
 using Tesseract;
 using VideoTextExtraction.Models;
 using VideoTextExtraction.Utilities;
@@ -40,8 +41,10 @@ public class OcrEngine : IDisposable
                 return string.Empty;
             }
 
-            // Process each frame with OCR
-            var extractedText = ProcessFrames(framePaths, options);
+            // Process each frame with OCR (parallel or sequential)
+            var extractedText = options.EnableParallelProcessing
+                ? ProcessFramesParallel(framePaths, options)
+                : ProcessFrames(framePaths, options);
 
             return extractedText;
         }
@@ -269,6 +272,348 @@ public class OcrEngine : IDisposable
         }
 
         return result.ToString();
+    }
+
+    private string ProcessFramesParallel(List<string> framePaths, ProcessingOptions options)
+    {
+        Logger.Info($"Processing {framePaths.Count} frames with PARALLEL OCR...");
+        Logger.Info($"Duplicate removal: {(options.RemoveDuplicates ? "Enabled" : "Disabled")}");
+        Logger.Info($"Comparison method: {(options.UseImageComparison ? "Visual (Image)" : "Text-based")}");
+        Logger.Info($"Output mode: {(options.SaveSeparateFiles ? "Separate files" : "Combined file")}");
+
+        // Determine degree of parallelism
+        var maxParallelism = options.MaxDegreeOfParallelism > 0
+            ? options.MaxDegreeOfParallelism
+            : Math.Max(1, Environment.ProcessorCount - 1); // Leave one core free
+
+        Logger.Info($"Parallel processing: {maxParallelism} threads");
+
+        if (options.MaxDurationSeconds > 0)
+        {
+            var maxTime = TimeSpan.FromSeconds(options.MaxDurationSeconds);
+            Logger.Info($"Time limit: {maxTime:hh\\:mm\\:ss}");
+        }
+
+        if (options.StopAfterEmptyFrames > 0)
+        {
+            Logger.Info($"Auto-stop after {options.StopAfterEmptyFrames} consecutive empty frames");
+        }
+
+        // Thread-safe collections for results
+        var frameResults = new ConcurrentDictionary<int, FrameResult>();
+        var processedCount = new System.Threading.Interlocked64Counter();
+        var textFoundCount = new System.Threading.Interlocked64Counter();
+        var duplicatesSkipped = new System.Threading.Interlocked64Counter();
+        var lowConfidenceSkipped = new System.Threading.Interlocked64Counter();
+        var errors = new ConcurrentBag<string>();
+        var shouldStop = false;
+
+        // Create output directory for separate files if needed
+        string? separateFilesDir = null;
+        if (options.SaveSeparateFiles)
+        {
+            var baseDir = Path.GetDirectoryName(options.OutputPath) ?? ".";
+            var baseName = Path.GetFileNameWithoutExtension(options.OutputPath);
+            separateFilesDir = Path.Combine(baseDir, $"{baseName}_frames");
+            Directory.CreateDirectory(separateFilesDir);
+            Logger.Info($"Saving separate files to: {separateFilesDir}");
+        }
+
+        // Thread-local Tesseract engines
+        var threadLocalEngines = new ThreadLocal<TesseractEngine>(() =>
+        {
+            try
+            {
+                var engine = new TesseractEngine(options.TessDataPath, options.OcrLanguage, EngineMode.Default);
+                engine.SetVariable("tessedit_char_whitelist", "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 .,?!:;-()[]{}\"'/@#$%&*+=");
+                engine.SetVariable("preserve_interword_spaces", "1");
+                return engine;
+            }
+            catch (Exception ex)
+            {
+                errors.Add($"Failed to create thread-local OCR engine: {ex.Message}");
+                throw;
+            }
+        }, trackAllValues: true);
+
+        try
+        {
+            // Configure parallel options
+            var parallelOptions = new ParallelOptions
+            {
+                MaxDegreeOfParallelism = maxParallelism
+            };
+
+            // Process frames in parallel
+            Parallel.ForEach(framePaths, parallelOptions, (framePath, loopState) =>
+            {
+                if (shouldStop)
+                {
+                    loopState.Stop();
+                    return;
+                }
+
+                try
+                {
+                    var currentFrameNum = ExtractFrameNumber(framePath);
+                    var currentTimestamp = CalculateTimestamp(currentFrameNum, options.FramesPerSecond);
+                    var currentSeconds = currentFrameNum / options.FramesPerSecond;
+
+                    // Check time limit
+                    if (options.MaxDurationSeconds > 0 && currentSeconds > options.MaxDurationSeconds)
+                    {
+                        shouldStop = true;
+                        loopState.Stop();
+                        return;
+                    }
+
+                    var count = processedCount.Increment();
+
+                    if (count % 10 == 0 || count == 1)
+                    {
+                        var percent = (int)((double)count / framePaths.Count * 100);
+                        Logger.Info($"Processing frame {count}/{framePaths.Count} ({percent}%) at {currentTimestamp}");
+                    }
+
+                    // Get thread-local engine
+                    var engine = threadLocalEngines.Value;
+                    if (engine == null)
+                    {
+                        errors.Add($"Thread-local engine not initialized for frame {currentFrameNum}");
+                        return;
+                    }
+
+                    // Extract text using thread-local engine
+                    var text = ExtractTextFromImageParallel(framePath, engine);
+
+                    if (string.IsNullOrWhiteSpace(text))
+                    {
+                        lowConfidenceSkipped.Increment();
+                        return;
+                    }
+
+                    // Store result for later processing
+                    var result = new FrameResult
+                    {
+                        FrameNumber = currentFrameNum,
+                        Timestamp = currentTimestamp,
+                        Text = text.Trim(),
+                        CleanText = CleanText(text),
+                        ImagePath = framePath
+                    };
+
+                    frameResults.TryAdd(currentFrameNum, result);
+                    textFoundCount.Increment();
+                }
+                catch (Exception ex)
+                {
+                    var frameNum = ExtractFrameNumber(framePath);
+                    var error = $"Error processing frame {frameNum}: {ex.Message}";
+                    errors.Add(error);
+                    Logger.Warning(error);
+                }
+            });
+
+            // Post-process results sequentially (for duplicate detection and ordering)
+            var finalResults = PostProcessParallelResults(frameResults, options, separateFilesDir,
+                out var duplicatesSkippedCount, out var uniqueFrameCount,
+                out var firstTimestamp, out var lastTimestamp);
+
+            duplicatesSkipped.Add(duplicatesSkippedCount);
+
+            // Log results
+            Logger.Success($"OCR complete:");
+            Logger.Info($"  - Frames processed: {processedCount.Value}");
+            Logger.Info($"  - Unique frames found: {uniqueFrameCount}");
+            Logger.Info($"  - Low confidence skipped: {lowConfidenceSkipped.Value}");
+            Logger.Info($"  - Duplicates skipped: {duplicatesSkipped.Value}");
+
+            if (errors.Any())
+            {
+                Logger.Warning($"  - Errors encountered: {errors.Count}");
+            }
+
+            if (uniqueFrameCount > 0)
+            {
+                Logger.Info($"  - First text found at: {firstTimestamp}");
+                Logger.Info($"  - Last text found at: {lastTimestamp}");
+
+                var timeSpan = ParseTimestamp(lastTimestamp) - ParseTimestamp(firstTimestamp);
+                Logger.Info($"  - Text found across: {FormatTimeSpan(timeSpan)}");
+            }
+            else
+            {
+                Logger.Warning("  - No text found in video");
+            }
+
+            if (options.SaveSeparateFiles && separateFilesDir != null)
+            {
+                Logger.Success($"Saved {uniqueFrameCount} separate files to: {separateFilesDir}");
+            }
+
+            return finalResults;
+        }
+        finally
+        {
+            // Dispose all thread-local engines
+            if (threadLocalEngines.IsValueCreated)
+            {
+                foreach (var engine in threadLocalEngines.Values)
+                {
+                    try
+                    {
+                        engine?.Dispose();
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.Warning($"Error disposing thread-local engine: {ex.Message}");
+                    }
+                }
+            }
+            threadLocalEngines.Dispose();
+        }
+    }
+
+    private string PostProcessParallelResults(
+        ConcurrentDictionary<int, FrameResult> frameResults,
+        ProcessingOptions options,
+        string? separateFilesDir,
+        out int duplicatesSkipped,
+        out int uniqueFrameCount,
+        out string firstTimestamp,
+        out string lastTimestamp)
+    {
+        var result = new StringBuilder();
+        var previousText = string.Empty;
+        string? previousImagePath = null;
+        duplicatesSkipped = 0;
+        uniqueFrameCount = 0;
+        firstTimestamp = "";
+        lastTimestamp = "00:00:00";
+        int outputFrameNumber = 1;
+
+        // Sort results by frame number for sequential processing
+        var sortedResults = frameResults.OrderBy(kvp => kvp.Key).Select(kvp => kvp.Value).ToList();
+
+        foreach (var frameResult in sortedResults)
+        {
+            try
+            {
+                // Check for duplicate images
+                if (options.RemoveDuplicates && options.UseImageComparison && previousImagePath != null)
+                {
+                    if (AreImagesSimilar(previousImagePath, frameResult.ImagePath, options.ImageSimilarityThreshold))
+                    {
+                        duplicatesSkipped++;
+                        continue; // Skip duplicate image
+                    }
+                }
+
+                // Text-based duplicate check
+                if (options.RemoveDuplicates && !options.UseImageComparison)
+                {
+                    if (IsSimilarText(frameResult.CleanText, previousText))
+                    {
+                        duplicatesSkipped++;
+                        continue; // Skip duplicate text
+                    }
+                }
+
+                // This is a unique frame
+                uniqueFrameCount++;
+                previousImagePath = frameResult.ImagePath;
+                previousText = frameResult.CleanText;
+
+                // Track timestamps
+                lastTimestamp = frameResult.Timestamp;
+                if (string.IsNullOrEmpty(firstTimestamp))
+                {
+                    firstTimestamp = frameResult.Timestamp;
+                }
+
+                // Build output
+                var frameOutput = new StringBuilder();
+
+                if (options.IncludeTimestamps)
+                {
+                    frameOutput.AppendLine($"[{frameResult.Timestamp}]");
+                }
+
+                frameOutput.AppendLine(frameResult.Text);
+
+                // Save to separate file or combined file
+                if (options.SaveSeparateFiles && separateFilesDir != null)
+                {
+                    var fileName = $"frame_{outputFrameNumber:D4}.txt";
+                    var filePath = Path.Combine(separateFilesDir, fileName);
+                    File.WriteAllText(filePath, frameOutput.ToString());
+                }
+                else
+                {
+                    result.AppendLine(frameOutput.ToString());
+                    result.AppendLine(); // Add blank line between segments
+                }
+
+                outputFrameNumber++;
+            }
+            catch (Exception ex)
+            {
+                Logger.Warning($"Error post-processing frame {frameResult.FrameNumber}: {ex.Message}");
+            }
+        }
+
+        return result.ToString();
+    }
+
+    private string ExtractTextFromImageParallel(string imagePath, TesseractEngine engine)
+    {
+        try
+        {
+            using var img = Pix.LoadFromFile(imagePath);
+
+            // Preprocess image for better OCR
+            using var processed = PreprocessImage(img);
+
+            // Use PSM_AUTO for automatic page segmentation
+            using var page = engine.Process(processed, PageSegMode.Auto);
+
+            var text = page.GetText();
+            var confidence = page.GetMeanConfidence();
+
+            // Only return text if confidence is reasonable
+            if (confidence < 0.6f)
+            {
+                return string.Empty;
+            }
+
+            return text?.Trim() ?? string.Empty;
+        }
+        catch (Exception ex)
+        {
+            Logger.Warning($"Error extracting text from {Path.GetFileName(imagePath)}: {ex.Message}");
+            return string.Empty;
+        }
+    }
+
+    private class FrameResult
+    {
+        public int FrameNumber { get; set; }
+        public string Timestamp { get; set; } = string.Empty;
+        public string Text { get; set; } = string.Empty;
+        public string CleanText { get; set; } = string.Empty;
+        public string ImagePath { get; set; } = string.Empty;
+    }
+
+    // Helper class for thread-safe counter
+    private class Interlocked64Counter
+    {
+        private long _value = 0;
+
+        public long Value => System.Threading.Interlocked.Read(ref _value);
+
+        public long Increment() => System.Threading.Interlocked.Increment(ref _value);
+
+        public void Add(long value) => System.Threading.Interlocked.Add(ref _value, value);
     }
 
     private string ExtractTextFromImage(string imagePath)

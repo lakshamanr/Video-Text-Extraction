@@ -90,6 +90,18 @@ class Program
             description: "Maximum video length to process in minutes (0 = entire video)",
             getDefaultValue: () => 0);
 
+        // Parallel processing option
+        var parallelProcessingOption = new Option<bool>(
+            aliases: new[] { "--parallel" },
+            description: "Enable parallel processing for faster OCR extraction",
+            getDefaultValue: () => false);
+
+        // Max degree of parallelism option
+        var maxParallelismOption = new Option<int>(
+            aliases: new[] { "--threads" },
+            description: "Maximum number of parallel threads (0 = auto-detect CPU cores)",
+            getDefaultValue: () => 0);
+
         rootCommand.AddOption(videoOption);
         rootCommand.AddOption(outputOption);
         rootCommand.AddOption(fpsOption);
@@ -100,6 +112,8 @@ class Program
         rootCommand.AddOption(tessDataOption);
         rootCommand.AddOption(removeDuplicatesOption);
         rootCommand.AddOption(videoLengthOption);
+        rootCommand.AddOption(parallelProcessingOption);
+        rootCommand.AddOption(maxParallelismOption);
 
         // Use custom handler to avoid parameter limit (max 8 in SetHandler)
         rootCommand.SetHandler(async (context) =>
@@ -114,6 +128,8 @@ class Program
             var tessData = context.ParseResult.GetValueForOption(tessDataOption);
             var removeDuplicates = context.ParseResult.GetValueForOption(removeDuplicatesOption);
             var videoLength = context.ParseResult.GetValueForOption(videoLengthOption);
+            var enableParallel = context.ParseResult.GetValueForOption(parallelProcessingOption);
+            var maxParallelism = context.ParseResult.GetValueForOption(maxParallelismOption);
 
             if (video == null || output == null)
             {
@@ -133,7 +149,9 @@ class Program
                 OcrLanguage = ocrLang,
                 TessDataPath = tessData,
                 RemoveDuplicates = removeDuplicates,
-                MaxVideoLengthMinutes = videoLength
+                MaxVideoLengthMinutes = videoLength,
+                EnableParallelProcessing = enableParallel,
+                MaxDegreeOfParallelism = maxParallelism
             };
 
             await ProcessVideoAsync(options);
