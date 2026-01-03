@@ -19,6 +19,7 @@ public partial class MainForm : Form
     private CheckBox chkSaveSeparateFiles = null!;
     private NumericUpDown numMaxMinutes = null!;
     private NumericUpDown numStopAfterEmpty = null!;
+    private NumericUpDown numVideoLength = null!;
     private TextBox txtLanguage = null!;
     private TextBox txtOcrLang = null!;
     private TextBox txtTessData = null!;
@@ -38,9 +39,9 @@ public partial class MainForm : Form
     {
         // Form properties
         this.Text = "Video Text Extraction Tool";
-        this.Size = new System.Drawing.Size(800, 795);
+        this.Size = new System.Drawing.Size(800, 830);
         this.StartPosition = FormStartPosition.CenterScreen;
-        this.MinimumSize = new System.Drawing.Size(800, 795);
+        this.MinimumSize = new System.Drawing.Size(800, 830);
 
         // Create controls
         int y = 20;
@@ -111,7 +112,7 @@ public partial class MainForm : Form
         {
             Text = "Extraction Options",
             Location = new System.Drawing.Point(20, y),
-            Size = new System.Drawing.Size(controlWidth + labelWidth, 295)
+            Size = new System.Drawing.Size(controlWidth + labelWidth, 330)
         };
         this.Controls.Add(grpOptions);
 
@@ -259,6 +260,33 @@ public partial class MainForm : Form
 
         grpY += 35;
 
+        // Video length limit
+        var lblVideoLength = new Label
+        {
+            Text = "Video Length (min):",
+            Location = new System.Drawing.Point(15, grpY + 3),
+            Size = new System.Drawing.Size(150, 23),
+            TextAlign = System.Drawing.ContentAlignment.MiddleLeft
+        };
+        grpOptions.Controls.Add(lblVideoLength);
+
+        numVideoLength = new NumericUpDown
+        {
+            Location = new System.Drawing.Point(170, grpY),
+            Size = new System.Drawing.Size(80, 23),
+            Minimum = 0,
+            Maximum = 999,
+            Value = 0
+        };
+        grpOptions.Controls.Add(numVideoLength);
+
+        // Tooltip for video length
+        var tooltipVideoLength = new ToolTip();
+        tooltipVideoLength.SetToolTip(numVideoLength, "Process only first N minutes of video (0 = entire video)");
+        tooltipVideoLength.SetToolTip(lblVideoLength, "Process only first N minutes of video (0 = entire video)");
+
+        grpY += 35;
+
         // OCR language
         var lblOcrLang = new Label
         {
@@ -295,7 +323,7 @@ public partial class MainForm : Form
         };
         grpOptions.Controls.Add(txtTessData);
 
-        y += 310;
+        y += 345;
 
         // Process button
         btnProcess = new Button
@@ -431,6 +459,7 @@ public partial class MainForm : Form
             SaveSeparateFiles = chkSaveSeparateFiles.Checked,
             MaxDurationSeconds = (int)numMaxMinutes.Value * 60,
             StopAfterEmptyFrames = (int)numStopAfterEmpty.Value,
+            MaxVideoLengthMinutes = (int)numVideoLength.Value,
             PreferredLanguage = string.IsNullOrWhiteSpace(txtLanguage.Text) ? null : txtLanguage.Text,
             OcrLanguage = txtOcrLang.Text,
             TessDataPath = txtTessData.Text

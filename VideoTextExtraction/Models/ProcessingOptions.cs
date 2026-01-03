@@ -79,6 +79,12 @@ public class ProcessingOptions
     /// Stop processing after finding no text for this many consecutive frames
     /// </summary>
     public int StopAfterEmptyFrames { get; set; } = 0;
+
+    /// <summary>
+    /// Maximum video length to process from the start (in minutes, 0 = process entire video)
+    /// For example, if set to 30, only the first 30 minutes of the video will be processed
+    /// </summary>
+    public int MaxVideoLengthMinutes { get; set; } = 0;
 }
 
 public enum OutputFormat

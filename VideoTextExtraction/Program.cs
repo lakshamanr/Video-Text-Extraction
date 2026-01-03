@@ -84,6 +84,12 @@ class Program
             description: "Remove duplicate text from consecutive frames",
             getDefaultValue: () => true);
 
+        // Video length limit option
+        var videoLengthOption = new Option<int>(
+            aliases: new[] { "--video-length" },
+            description: "Maximum video length to process in minutes (0 = entire video)",
+            getDefaultValue: () => 0);
+
         rootCommand.AddOption(videoOption);
         rootCommand.AddOption(outputOption);
         rootCommand.AddOption(fpsOption);
@@ -93,6 +99,7 @@ class Program
         rootCommand.AddOption(ocrLangOption);
         rootCommand.AddOption(tessDataOption);
         rootCommand.AddOption(removeDuplicatesOption);
+        rootCommand.AddOption(videoLengthOption);
 
         // Use custom handler to avoid parameter limit (max 8 in SetHandler)
         rootCommand.SetHandler(async (context) =>
@@ -106,6 +113,7 @@ class Program
             var ocrLang = context.ParseResult.GetValueForOption(ocrLangOption);
             var tessData = context.ParseResult.GetValueForOption(tessDataOption);
             var removeDuplicates = context.ParseResult.GetValueForOption(removeDuplicatesOption);
+            var videoLength = context.ParseResult.GetValueForOption(videoLengthOption);
 
             if (video == null || output == null)
             {
@@ -124,7 +132,8 @@ class Program
                 PreferredLanguage = language,
                 OcrLanguage = ocrLang,
                 TessDataPath = tessData,
-                RemoveDuplicates = removeDuplicates
+                RemoveDuplicates = removeDuplicates,
+                MaxVideoLengthMinutes = videoLength
             };
 
             await ProcessVideoAsync(options);

@@ -30,15 +30,35 @@ public class FrameExtractor
 
             Logger.Info($"Video duration: {duration:hh\\:mm\\:ss}");
 
+            // Calculate effective duration to process
+            var processingDuration = duration;
+            if (options.MaxVideoLengthMinutes > 0)
+            {
+                var maxDuration = TimeSpan.FromMinutes(options.MaxVideoLengthMinutes);
+                if (maxDuration < duration)
+                {
+                    processingDuration = maxDuration;
+                    Logger.Info($"Video length limit: Processing only first {options.MaxVideoLengthMinutes} minutes ({maxDuration:hh\\:mm\\:ss})");
+                }
+            }
+
             // Build FFmpeg command to extract frames
             var conversion = FFmpeg.Conversions.New()
-                .AddParameter($"-i \"{videoPath}\"")
+                .AddParameter($"-i \"{videoPath}\"");
+
+            // Add duration limit if specified
+            if (options.MaxVideoLengthMinutes > 0 && processingDuration < duration)
+            {
+                conversion.AddParameter($"-t {(int)processingDuration.TotalSeconds}");
+            }
+
+            conversion
                 .AddParameter($"-vf fps={options.FramesPerSecond}")
                 .AddParameter($"\"{outputPattern}\"");
 
             conversion.OnProgress += (sender, args) =>
             {
-                var percent = (int)(args.Duration.TotalSeconds / duration.TotalSeconds * 100);
+                var percent = (int)(args.Duration.TotalSeconds / processingDuration.TotalSeconds * 100);
                 Logger.Info($"Extracting frames... {percent}%");
             };
 
