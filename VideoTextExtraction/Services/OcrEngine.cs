@@ -301,10 +301,10 @@ public class OcrEngine : IDisposable
 
         // Thread-safe collections for results
         var frameResults = new ConcurrentDictionary<int, FrameResult>();
-        var processedCount = new System.Threading.Interlocked64Counter();
-        var textFoundCount = new System.Threading.Interlocked64Counter();
-        var duplicatesSkipped = new System.Threading.Interlocked64Counter();
-        var lowConfidenceSkipped = new System.Threading.Interlocked64Counter();
+        var processedCount = new Interlocked64Counter();
+        var textFoundCount = new Interlocked64Counter();
+        var duplicatesSkipped = new Interlocked64Counter();
+        var lowConfidenceSkipped = new Interlocked64Counter();
         var errors = new ConcurrentBag<string>();
         var shouldStop = false;
 
