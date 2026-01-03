@@ -95,6 +95,12 @@ public class ProcessingOptions
     /// Maximum degree of parallelism (number of frames to process simultaneously, 0 = auto)
     /// </summary>
     public int MaxDegreeOfParallelism { get; set; } = 0;
+
+    /// <summary>
+    /// Minimum OCR confidence threshold (0.0 to 1.0, default 0.6)
+    /// Lower values extract more text but may include errors
+    /// </summary>
+    public float OcrConfidenceThreshold { get; set; } = 0.6f;
 }
 
 public enum OutputFormat

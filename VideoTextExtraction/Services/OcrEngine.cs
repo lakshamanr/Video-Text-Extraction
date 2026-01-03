@@ -42,9 +42,13 @@ public class OcrEngine : IDisposable
             }
 
             // Process each frame with OCR (parallel or sequential)
+            Logger.Info($"Processing mode: {(options.EnableParallelProcessing ? "PARALLEL" : "SEQUENTIAL")}");
+
             var extractedText = options.EnableParallelProcessing
                 ? ProcessFramesParallel(framePaths, options)
                 : ProcessFrames(framePaths, options);
+
+            Logger.Info($"Extraction complete. Text length: {extractedText.Length} characters");
 
             return extractedText;
         }
@@ -97,6 +101,7 @@ public class OcrEngine : IDisposable
         Logger.Info($"Duplicate removal: {(options.RemoveDuplicates ? "Enabled" : "Disabled")}");
         Logger.Info($"Comparison method: {(options.UseImageComparison ? "Visual (Image)" : "Text-based")}");
         Logger.Info($"Output mode: {(options.SaveSeparateFiles ? "Separate files" : "Combined file")}");
+        Logger.Info($"OCR confidence threshold: {options.OcrConfidenceThreshold:F2}");
 
         if (options.MaxDurationSeconds > 0)
         {
@@ -166,7 +171,7 @@ public class OcrEngine : IDisposable
                     }
                 }
 
-                var text = ExtractTextFromImage(framePath);
+                var text = ExtractTextFromImage(framePath, options.OcrConfidenceThreshold);
 
                 if (string.IsNullOrWhiteSpace(text))
                 {
@@ -280,6 +285,7 @@ public class OcrEngine : IDisposable
         Logger.Info($"Duplicate removal: {(options.RemoveDuplicates ? "Enabled" : "Disabled")}");
         Logger.Info($"Comparison method: {(options.UseImageComparison ? "Visual (Image)" : "Text-based")}");
         Logger.Info($"Output mode: {(options.SaveSeparateFiles ? "Separate files" : "Combined file")}");
+        Logger.Info($"OCR confidence threshold: {options.OcrConfidenceThreshold:F2}");
 
         // Determine degree of parallelism
         var maxParallelism = options.MaxDegreeOfParallelism > 0
@@ -324,14 +330,18 @@ public class OcrEngine : IDisposable
         {
             try
             {
+                Logger.Info($"Creating thread-local Tesseract engine for thread {System.Threading.Thread.CurrentThread.ManagedThreadId}");
                 var engine = new TesseractEngine(options.TessDataPath, options.OcrLanguage, EngineMode.Default);
                 engine.SetVariable("tessedit_char_whitelist", "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 .,?!:;-()[]{}\"'/@#$%&*+=");
                 engine.SetVariable("preserve_interword_spaces", "1");
+                Logger.Info($"Thread-local engine created successfully for thread {System.Threading.Thread.CurrentThread.ManagedThreadId}");
                 return engine;
             }
             catch (Exception ex)
             {
-                errors.Add($"Failed to create thread-local OCR engine: {ex.Message}");
+                var error = $"Failed to create thread-local OCR engine: {ex.Message}";
+                errors.Add(error);
+                Logger.Error(error);
                 throw;
             }
         }, trackAllValues: true);
@@ -384,7 +394,7 @@ public class OcrEngine : IDisposable
                     }
 
                     // Extract text using thread-local engine
-                    var text = ExtractTextFromImageParallel(framePath, engine);
+                    var text = ExtractTextFromImageParallel(framePath, engine, options.OcrConfidenceThreshold);
 
                     if (string.IsNullOrWhiteSpace(text))
                     {
@@ -415,6 +425,7 @@ public class OcrEngine : IDisposable
             });
 
             // Post-process results sequentially (for duplicate detection and ordering)
+            Logger.Info($"Post-processing {frameResults.Count} frame results...");
             var finalResults = PostProcessParallelResults(frameResults, options, separateFilesDir,
                 out var duplicatesSkippedCount, out var uniqueFrameCount,
                 out var firstTimestamp, out var lastTimestamp);
@@ -424,6 +435,7 @@ public class OcrEngine : IDisposable
             // Log results
             Logger.Success($"OCR complete:");
             Logger.Info($"  - Frames processed: {processedCount.Value}");
+            Logger.Info($"  - Frames with text extracted: {textFoundCount.Value}");
             Logger.Info($"  - Unique frames found: {uniqueFrameCount}");
             Logger.Info($"  - Low confidence skipped: {lowConfidenceSkipped.Value}");
             Logger.Info($"  - Duplicates skipped: {duplicatesSkipped.Value}");
@@ -565,7 +577,7 @@ public class OcrEngine : IDisposable
         return result.ToString();
     }
 
-    private string ExtractTextFromImageParallel(string imagePath, TesseractEngine engine)
+    private string ExtractTextFromImageParallel(string imagePath, TesseractEngine engine, float confidenceThreshold)
     {
         try
         {
@@ -581,8 +593,12 @@ public class OcrEngine : IDisposable
             var confidence = page.GetMeanConfidence();
 
             // Only return text if confidence is reasonable
-            if (confidence < 0.6f)
+            if (confidence < confidenceThreshold)
             {
+                if (!string.IsNullOrWhiteSpace(text))
+                {
+                    Logger.Warning($"Frame {Path.GetFileName(imagePath)}: Low confidence {confidence:F2} (threshold {confidenceThreshold:F2}), text discarded");
+                }
                 return string.Empty;
             }
 
@@ -616,7 +632,7 @@ public class OcrEngine : IDisposable
         public void Add(long value) => System.Threading.Interlocked.Add(ref _value, value);
     }
 
-    private string ExtractTextFromImage(string imagePath)
+    private string ExtractTextFromImage(string imagePath, float confidenceThreshold)
     {
         if (_engine == null)
         {
@@ -635,8 +651,12 @@ public class OcrEngine : IDisposable
         var confidence = page.GetMeanConfidence();
 
         // Only return text if confidence is reasonable (raised threshold for better quality)
-        if (confidence < 0.6f)
+        if (confidence < confidenceThreshold)
         {
+            if (!string.IsNullOrWhiteSpace(text))
+            {
+                Logger.Warning($"Frame {Path.GetFileName(imagePath)}: Low confidence {confidence:F2} (threshold {confidenceThreshold:F2}), text discarded");
+            }
             return string.Empty;
         }
 
